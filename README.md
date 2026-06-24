@@ -48,6 +48,26 @@ cp target/release/viztokens ~/.local/bin/
 
 Requires Rust 1.78+ stable (`rustup update stable`) and at least one Claude Code session on disk.
 
+## Update
+
+**From crates.io**:
+```bash
+cargo install viztokens
+```
+
+**From GitHub**:
+```bash
+cargo install --git https://github.com/hansipie/viztokens --force
+```
+
+**From source**:
+```bash
+cd viztokens
+git pull
+cargo build --release
+cp target/release/viztokens ~/.local/bin/
+```
+
 ## Usage
 
 ```bash
