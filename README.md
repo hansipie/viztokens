@@ -26,12 +26,27 @@ Claude Code requires zero configuration changes. viztokens reads the same files 
 
 ## Install
 
+**From crates.io** (once published):
 ```bash
-cargo build --release
-# Binary: ./target/release/viztokens
+cargo install viztokens
 ```
 
-Requires Rust 1.78+ stable and at least one Claude Code session on disk.
+**From GitHub** (latest commit):
+```bash
+cargo install --git https://github.com/hansipie/viztokens
+```
+
+**From source**:
+```bash
+git clone https://github.com/hansipie/viztokens
+cd viztokens
+cargo build --release
+# Binary at ./target/release/viztokens
+# Copy it anywhere on your PATH:
+cp target/release/viztokens ~/.local/bin/
+```
+
+Requires Rust 1.78+ stable (`rustup update stable`) and at least one Claude Code session on disk.
 
 ## Usage
 
