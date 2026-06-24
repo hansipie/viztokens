@@ -25,7 +25,7 @@ impl Store {
     }
 
     pub fn insert_session(&self, s: &Session) -> anyhow::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("SQLite mutex poisoned"))?;
         conn.execute(
             "INSERT OR IGNORE INTO sessions
              (id, project_name, file_path, first_seen_at, last_seen_at, status, message_count)
@@ -49,7 +49,7 @@ impl Store {
         timestamp: &chrono::DateTime<chrono::Utc>,
         message_count: u64,
     ) -> anyhow::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("SQLite mutex poisoned"))?;
         conn.execute(
             "UPDATE sessions SET last_seen_at=?1, message_count=?2 WHERE id=?3",
             params![timestamp.to_rfc3339(), message_count as i64, id],
@@ -57,8 +57,8 @@ impl Store {
         Ok(())
     }
 
-    pub fn insert_message(&self, m: &Message) -> anyhow::Result<i64> {
-        let conn = self.conn.lock().unwrap();
+    pub fn insert_message(&self, m: &Message) -> anyhow::Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("SQLite mutex poisoned"))?;
         conn.execute(
             "INSERT OR IGNORE INTO messages
              (session_id, sequence_num, message_type, timestamp, content,
@@ -80,11 +80,11 @@ impl Store {
                 m.model,
             ],
         )?;
-        Ok(conn.last_insert_rowid())
+        Ok(())
     }
 
     pub fn query_messages(&self, session_id: &str) -> anyhow::Result<Vec<Message>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("SQLite mutex poisoned"))?;
         let mut stmt = conn.prepare(
             "SELECT id, session_id, sequence_num, message_type, timestamp, content,
                     tool_name, tool_use_id, anthropic_msg_id, request_id,
@@ -130,9 +130,7 @@ impl Store {
         ) in rows
         {
             let message_type = parse_message_type(&mt_str);
-            let timestamp = ts_str
-                .parse::<chrono::DateTime<chrono::Utc>>()
-                .unwrap_or_else(|_| chrono::Utc::now());
+            let timestamp = parse_ts(&ts_str);
             messages.push(Message {
                 id: Some(id),
                 session_id: sid,
@@ -153,7 +151,7 @@ impl Store {
     }
 
     pub fn list_sessions(&self) -> anyhow::Result<Vec<Session>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("SQLite mutex poisoned"))?;
         let mut stmt = conn.prepare(
             "SELECT id, project_name, file_path, first_seen_at, last_seen_at, status, message_count
              FROM sessions ORDER BY last_seen_at ASC",
@@ -180,12 +178,8 @@ impl Store {
                 id,
                 project_name,
                 file_path: std::path::PathBuf::from(file_path),
-                first_seen_at: first_seen_at
-                    .parse::<chrono::DateTime<chrono::Utc>>()
-                    .unwrap_or_else(|_| chrono::Utc::now()),
-                last_seen_at: last_seen_at
-                    .parse::<chrono::DateTime<chrono::Utc>>()
-                    .unwrap_or_else(|_| chrono::Utc::now()),
+                first_seen_at: parse_ts(&first_seen_at),
+                last_seen_at: parse_ts(&last_seen_at),
                 status: parse_session_status(&status_str),
                 message_count: message_count as u64,
             });
@@ -194,7 +188,7 @@ impl Store {
     }
 
     pub fn count_messages(&self, session_id: &str) -> anyhow::Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("SQLite mutex poisoned"))?;
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM messages WHERE session_id=?1",
             params![session_id],
@@ -211,7 +205,7 @@ impl Store {
         if anthropic_msg_id.is_none() && request_id.is_none() {
             return Ok(false);
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("SQLite mutex poisoned"))?;
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM messages WHERE anthropic_msg_id=?1 AND request_id=?2",
             params![anthropic_msg_id, request_id],
@@ -219,6 +213,13 @@ impl Store {
         )?;
         Ok(count > 0)
     }
+}
+
+fn parse_ts(s: &str) -> chrono::DateTime<chrono::Utc> {
+    s.parse::<chrono::DateTime<chrono::Utc>>().unwrap_or_else(|_| {
+        tracing::warn!("unparseable timestamp in DB: {s:?}; using Unix epoch as sentinel");
+        chrono::TimeZone::timestamp_opt(&chrono::Utc, 0, 0).unwrap()
+    })
 }
 
 fn message_type_str(mt: &MessageType) -> &'static str {

@@ -25,13 +25,13 @@ pub fn resolve_config_dir(override_path: Option<PathBuf>) -> anyhow::Result<Path
         }
     }
     let home = dirs::home_dir().context("cannot determine home directory")?;
-    let primary = home.join(".claude");
-    if primary.exists() {
-        return Ok(primary);
+    let xdg_fallback = home.join(".config").join("claude");
+    if xdg_fallback.exists() {
+        return Ok(xdg_fallback);
     }
-    let fallback = home.join(".config").join("claude");
-    if fallback.exists() {
-        return Ok(fallback);
+    let dot_claude = home.join(".claude");
+    if dot_claude.exists() {
+        return Ok(dot_claude);
     }
     anyhow::bail!(
         "Claude config directory not found; set CLAUDE_CONFIG_DIR or create ~/.claude"
@@ -49,7 +49,10 @@ pub fn scan_sessions(config_dir: &Path) -> Vec<DiscoveredSession> {
 fn scan_dir(root: &Path, dir: &Path, out: &mut Vec<DiscoveredSession>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
-        Err(_) => return,
+        Err(e) => {
+            tracing::warn!("cannot scan {}: {e}", dir.display());
+            return;
+        }
     };
     for entry in entries.flatten() {
         let path = entry.path();

@@ -10,18 +10,6 @@ use ratatui::{
 
 use crate::model::{Message, MessageType};
 
-fn fmt_num(n: u32) -> String {
-    let s = n.to_string();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out.chars().rev().collect()
-}
-
 fn type_color(mt: &MessageType) -> Color {
     match mt {
         MessageType::System => Color::DarkGray,
@@ -104,9 +92,9 @@ pub fn render_message_list(
             .map(|m| format!("  {}", m))
             .unwrap_or_default();
         let token_suffix = match (msg.input_tokens, msg.output_tokens) {
-            (Some(i), Some(o)) => format!("  in:{} out:{}", fmt_num(i), fmt_num(o)),
-            (Some(i), None) => format!("  in:{}", fmt_num(i)),
-            (None, Some(o)) => format!("  out:{}", fmt_num(o)),
+            (Some(i), Some(o)) => format!("  in:{} out:{}", super::fmt_num(i as u64), super::fmt_num(o as u64)),
+            (Some(i), None) => format!("  in:{}", super::fmt_num(i as u64)),
+            (None, Some(o)) => format!("  out:{}", super::fmt_num(o as u64)),
             (None, None) => String::new(),
         };
         let title = format!(" {}{}  {} {}{}{}", project, label, ts, tool_suffix, model_suffix, token_suffix);

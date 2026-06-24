@@ -30,8 +30,6 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let store = Arc::new(Store::open(&db_path)?);
-
     // Handle subcommands that don't need a store
     if let Some(Command::Update) = args.command {
         let status = std::process::Command::new("cargo")
@@ -44,6 +42,8 @@ async fn main() -> anyhow::Result<()> {
             .status()?;
         std::process::exit(status.code().unwrap_or(1));
     }
+
+    let store = Arc::new(Store::open(&db_path)?);
 
     // Handle list-sessions subcommand
     if let Some(Command::ListSessions) = args.command {
@@ -83,6 +83,11 @@ async fn main() -> anyhow::Result<()> {
         discovered.retain(|s| &s.project_name == project);
     }
 
+    // Filter by session if requested
+    if let Some(ref session_id) = args.session {
+        discovered.retain(|s| s.session_id == *session_id);
+    }
+
     if discovered.is_empty() {
         anyhow::bail!("no Claude Code session files found in {}", config_dir.display());
     }
@@ -113,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
     for ds in &discovered {
         history.extend(store.query_messages(&ds.session_id)?);
     }
-    history.sort_by_key(|m: &viztokens::model::Message| m.timestamp);
+    history.sort_by_key(|m| m.timestamp);
 
     // Start TUI
     let app = App::new(rx, store, discovered, history);

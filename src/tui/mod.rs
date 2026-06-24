@@ -186,7 +186,7 @@ fn run_loop(
     app: &mut App,
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
 ) -> anyhow::Result<()> {
-    let tick = Duration::from_millis(16);
+    let tick = Duration::from_millis(100);
     loop {
         // Drain incoming watcher events
         while let Ok(evt) = app.rx.try_recv() {

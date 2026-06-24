@@ -13,8 +13,8 @@ fn make_session(id: &str) -> Session {
         id: id.to_string(),
         project_name: "test-project".to_string(),
         file_path: std::path::PathBuf::from("/tmp/test.jsonl"),
-        first_seen_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
-        last_seen_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
+        first_seen_at: chrono::TimeZone::timestamp_opt(&chrono::Utc, 0, 0).unwrap(),
+        last_seen_at: chrono::TimeZone::timestamp_opt(&chrono::Utc, 0, 0).unwrap(),
         status: SessionStatus::Watching,
         message_count: 0,
     }
@@ -26,7 +26,7 @@ fn make_message(session_id: &str, seq: u64, mt: MessageType) -> Message {
         session_id: session_id.to_string(),
         sequence_num: seq,
         message_type: mt,
-        timestamp: chrono::DateTime::from_timestamp(seq as i64, 0).unwrap(),
+        timestamp: chrono::TimeZone::timestamp_opt(&chrono::Utc, seq as i64, 0).unwrap(),
         content: format!("content {}", seq),
         tool_name: None,
         tool_use_id: None,
@@ -68,23 +68,20 @@ fn insert_and_query_50_messages_in_order() {
 }
 
 #[test]
-fn insert_message_returns_increasing_ids() {
+fn insert_multiple_messages_succeeds() {
     let store = open_memory_store();
     let session = make_session("sess-ids");
     store.insert_session(&session).unwrap();
 
-    let id1 = store
-        .insert_message(&make_message("sess-ids", 1, MessageType::User))
-        .unwrap();
-    let id2 = store
-        .insert_message(&make_message("sess-ids", 2, MessageType::Assistant))
-        .unwrap();
-    let id3 = store
-        .insert_message(&make_message("sess-ids", 3, MessageType::ToolCall))
-        .unwrap();
+    store.insert_message(&make_message("sess-ids", 1, MessageType::User)).unwrap();
+    store.insert_message(&make_message("sess-ids", 2, MessageType::Assistant)).unwrap();
+    store.insert_message(&make_message("sess-ids", 3, MessageType::ToolCall)).unwrap();
 
-    assert!(id1 < id2);
-    assert!(id2 < id3);
+    let msgs = store.query_messages("sess-ids").unwrap();
+    assert_eq!(msgs.len(), 3);
+    assert_eq!(msgs[0].sequence_num, 1);
+    assert_eq!(msgs[1].sequence_num, 2);
+    assert_eq!(msgs[2].sequence_num, 3);
 }
 
 #[test]
@@ -108,6 +105,9 @@ fn message_exists_detects_duplicates() {
 
 #[test]
 fn resolve_config_dir_uses_env_var() {
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = ENV_MUTEX.lock().unwrap();
+
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().to_str().unwrap().to_string();
     std::env::set_var("CLAUDE_CONFIG_DIR", &path);

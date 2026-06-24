@@ -56,23 +56,11 @@ pub fn render_header(state: &StatusBarState, area: Rect, frame: &mut Frame) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
-fn fmt_num(n: u64) -> String {
-    let s = n.to_string();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out.chars().rev().collect()
-}
-
 pub fn render_footer(state: &StatusBarState, area: Rect, frame: &mut Frame) {
     let token_label = format!(
         "  in:{} out:{}",
-        fmt_num(state.total_input_tokens),
-        fmt_num(state.total_output_tokens)
+        super::fmt_num(state.total_input_tokens),
+        super::fmt_num(state.total_output_tokens)
     );
     let line = Line::from(vec![
         Span::raw(" [↑↓] Scroll  [f] Filter  [End] Follow  [q] Quit"),

@@ -82,16 +82,20 @@ async fn run_inner(watcher: Watcher, session: DiscoveredSession) -> anyhow::Resu
         // Read newly appended bytes
         file.seek(SeekFrom::Start(offset))?;
         buf.clear();
-        file.read_to_string(&mut buf).unwrap_or_else(|_| {
-            // Non-UTF-8: hex-escape and continue
-            let mut raw = Vec::new();
-            let _ = file.read_to_end(&mut raw);
-            buf = raw.iter().map(|b| format!("\\x{b:02x}")).collect();
-            buf.len()
-        });
+        let bytes_read = match file.read_to_string(&mut buf) {
+            Ok(n) => n as u64,
+            Err(_) => {
+                // Non-UTF-8: re-seek to reset cursor, then read raw bytes
+                file.seek(SeekFrom::Start(offset))?;
+                let mut raw = Vec::new();
+                let n = file.read_to_end(&mut raw).unwrap_or(0);
+                buf = raw.iter().map(|b| format!("\\x{b:02x}")).collect();
+                n as u64
+            }
+        };
 
         if !buf.is_empty() {
-            offset += buf.len() as u64;
+            offset += bytes_read;
             partial.push_str(&buf);
 
             // Split on newlines, keeping incomplete trailing line in partial
@@ -145,7 +149,9 @@ async fn run_inner(watcher: Watcher, session: DiscoveredSession) -> anyhow::Resu
                     let store = watcher.store.clone();
                     let msg_clone = msg.clone();
                     tokio::task::spawn_blocking(move || {
-                        let _ = store.insert_message(&msg_clone);
+                        if let Err(e) = store.insert_message(&msg_clone) {
+                            tracing::warn!("failed to persist message: {e:#}");
+                        }
                     });
 
                     if watcher.tx.send(WatcherEvent::Message(msg)).await.is_err() {

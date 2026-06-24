@@ -75,8 +75,8 @@ pub fn parse_line(line: &str, session_id: &str, sequence_num: u64) -> anyhow::Re
     let anthropic_msg_id = msg.id.clone();
     let request_id = entry.request_id.clone();
     let model = msg.model.clone();
-    let input_tokens = msg.usage.as_ref().map(|u| u.input_tokens as u32);
-    let output_tokens = msg.usage.as_ref().map(|u| u.output_tokens as u32);
+    let input_tokens = msg.usage.as_ref().map(|u| u32::try_from(u.input_tokens).unwrap_or(u32::MAX));
+    let output_tokens = msg.usage.as_ref().map(|u| u32::try_from(u.output_tokens).unwrap_or(u32::MAX));
 
     // User messages have content as a plain string; assistant messages use blocks.
     let (plain_text, blocks) = match msg.content {
@@ -86,6 +86,9 @@ pub fn parse_line(line: &str, session_id: &str, sequence_num: u64) -> anyhow::Re
     };
 
     if let Some(text) = plain_text {
+        if text.trim().is_empty() {
+            return Ok(vec![]);
+        }
         let message_type = match role.as_str() {
             "assistant" => MessageType::Assistant,
             "user" => MessageType::User,
