@@ -5,23 +5,23 @@ A terminal UI that tails Claude Code's native JSONL session files and displays e
 Claude Code requires zero configuration changes. viztokens reads the same files [ccusage](https://github.com/ryoppippi/ccusage) uses.
 
 ```
- viztokens  ● WATCHING  my-project/a1b2c3d4  [follow]  filter: ALL
-┌ USER  12:34:05 ──────────────────────────────────────────────────┐
-│ What files are in the current directory?                         │
-└──────────────────────────────────────────────────────────────────┘
-┌ TOOL CALL  12:34:06  bash ───────────────────────────────────────┐
-│ {                                                                │
-│   "command": "ls -la"                                            │
-│ }                                                                │
-└──────────────────────────────────────────────────────────────────┘
-┌ TOOL RESULT  12:34:06 ───────────────────────────────────────────┐
-│ total 48                                                         │
-│ drwxr-xr-x 5 user group 160 Jun 23 12:34 .                      │
-└──────────────────────────────────────────────────────────────────┘
-┌ ASSISTANT  12:34:07 ─────────────────────────────────────────────┐
-│ The current directory contains the following files:              │
-└──────────────────────────────────────────────────────────────────┘
- [↑↓] Scroll  [f] Filter  [Tab] Session  [End] Follow  [q] Quit
+ viztokens  ● WATCHING  1/1 sessions  [follow]  filter: ALL
+┌ USER  12:34:05 ──────────────────────────────────────────────────────────┐
+│ What files are in the current directory?                                 │
+└──────────────────────────────────────────────────────────────────────────┘
+┌ TOOL CALL  12:34:06  bash ────────────────────────────────────────────────┐
+│ {                                                                         │
+│   "command": "ls -la"                                                     │
+│ }                                                                         │
+└───────────────────────────────────────────────────────────────────────────┘
+┌ TOOL RESULT  12:34:06 ────────────────────────────────────────────────────┐
+│ total 48                                                                  │
+│ drwxr-xr-x 5 user group 160 Jun 23 12:34 .                               │
+└───────────────────────────────────────────────────────────────────────────┘
+┌ ASSISTANT  12:34:07  claude-opus-4-5  in:12,450 out:312 ──────────────────┐
+│ The current directory contains the following files:                       │
+└───────────────────────────────────────────────────────────────────────────┘
+ [↑↓] Scroll  [f] Filter  [End] Follow  [q] Quit  in:12,450 out:312
 ```
 
 ## Install
@@ -69,7 +69,6 @@ VIZTOKENS_DB=/tmp/vt.db viztokens
 | `f` | Cycle filter: ALL → USER → ASSISTANT → TOOLS → SYSTEM → ALL |
 | `F` | Clear filter (show all types) |
 | `1` / `2` / `3` / `4` | Toggle USER / ASSISTANT / TOOL CALL+RESULT / SYSTEM |
-| `Tab` / `Shift+Tab` | Switch between sessions |
 | `q` / `Ctrl+C` | Quit |
 
 ## Message types
@@ -77,10 +76,14 @@ VIZTOKENS_DB=/tmp/vt.db viztokens
 | Block | Colour | What it shows |
 |-------|--------|---------------|
 | USER | Blue | Your typed prompt |
-| ASSISTANT | Green | Model prose response |
+| ASSISTANT | Green | Model prose response — includes model name and token counts |
 | TOOL CALL | Yellow | Tool name + full input JSON |
 | TOOL RESULT | Cyan | Complete tool output |
 | SYSTEM | Dark grey | System prompt entries |
+
+## Token counts
+
+Each ASSISTANT message title shows the model used and the input/output token counts for that exchange (e.g. `claude-opus-4-5  in:12,450 out:312`). The footer always shows the cumulative totals for all currently visible messages, updated live as the filter changes.
 
 ## Session discovery
 
@@ -106,6 +109,8 @@ viztokens
 └── TUI task (ratatui + crossterm)
     ├── 100 ms tick loop, drains the channel each tick
     ├── coloured block per message, full content wrapped to terminal width
+    ├── model name + token counts (in/out) in each message title
+    ├── cumulative token totals in the footer, filtered by active message type
     ├── scroll_offset + follow_mode (End re-enables auto-follow)
     └── filter predicate applied at render time — no messages are discarded
 ```
