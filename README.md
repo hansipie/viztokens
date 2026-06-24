@@ -104,9 +104,7 @@ Each ASSISTANT message title shows the model used and the input/output token cou
 viztokens searches for `.jsonl` files in this order:
 
 1. `$CLAUDE_CONFIG_DIR/projects/`
-2. `$XDG_CONFIG_HOME/claude/projects/`
-3. `~/.config/claude/projects/` (primary default)
-4. `~/.claude/projects/` (legacy fallback)
+2. `~/.claude/projects/`
 
 The most recently modified session is selected automatically. History is persisted to `~/.local/share/viztokens/sessions.db` (SQLite) so you can scroll back through sessions started before viztokens was running.
 

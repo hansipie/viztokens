@@ -18,17 +18,7 @@ pub fn resolve_config_dir(override_path: Option<PathBuf>) -> anyhow::Result<Path
     if let Ok(v) = std::env::var("CLAUDE_CONFIG_DIR") {
         return Ok(PathBuf::from(v));
     }
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        let p = PathBuf::from(xdg).join("claude");
-        if p.exists() {
-            return Ok(p);
-        }
-    }
     let home = dirs::home_dir().context("cannot determine home directory")?;
-    let xdg_fallback = home.join(".config").join("claude");
-    if xdg_fallback.exists() {
-        return Ok(xdg_fallback);
-    }
     let dot_claude = home.join(".claude");
     if dot_claude.exists() {
         return Ok(dot_claude);
