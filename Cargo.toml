@@ -1,0 +1,51 @@
+[package]
+name = "viztokens"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "viztokens"
+path = "src/main.rs"
+
+[[bench]]
+name = "render_bench"
+harness = false
+
+[[test]]
+name = "watcher_test"
+path = "tests/integration/watcher_test.rs"
+
+[[test]]
+name = "filter_behaviour_test"
+path = "tests/integration/filter_behaviour_test.rs"
+
+[[test]]
+name = "jsonl_parsing_test"
+path = "tests/unit/jsonl_parsing_test.rs"
+
+[[test]]
+name = "store_test"
+path = "tests/unit/store_test.rs"
+
+[dependencies]
+ratatui = { version = "0.30", default-features = false, features = [
+    "crossterm_0_29",
+    "unstable-rendered-line-info",
+] }
+crossterm = "0.29"
+tokio = { version = "1", features = ["full"] }
+notify = "6"
+dirs = "5"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive", "env"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"
