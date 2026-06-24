@@ -92,12 +92,19 @@ pub fn render_message_list(
             .map(|m| format!("  {}", m))
             .unwrap_or_default();
         let token_suffix = match (msg.input_tokens, msg.output_tokens) {
-            (Some(i), Some(o)) => format!("  in:{} out:{}", super::fmt_num(i as u64), super::fmt_num(o as u64)),
+            (Some(i), Some(o)) => format!(
+                "  in:{} out:{}",
+                super::fmt_num(i as u64),
+                super::fmt_num(o as u64)
+            ),
             (Some(i), None) => format!("  in:{}", super::fmt_num(i as u64)),
             (None, Some(o)) => format!("  out:{}", super::fmt_num(o as u64)),
             (None, None) => String::new(),
         };
-        let title = format!(" {}{}  {} {}{}{}", project, label, ts, tool_suffix, model_suffix, token_suffix);
+        let title = format!(
+            " {}{}  {} {}{}{}",
+            project, label, ts, tool_suffix, model_suffix, token_suffix
+        );
 
         // How many virtual lines of this message are above the viewport
         let skip_lines = scroll_offset.saturating_sub(msg_start) as u16;

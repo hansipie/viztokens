@@ -73,9 +73,15 @@ fn insert_multiple_messages_succeeds() {
     let session = make_session("sess-ids");
     store.insert_session(&session).unwrap();
 
-    store.insert_message(&make_message("sess-ids", 1, MessageType::User)).unwrap();
-    store.insert_message(&make_message("sess-ids", 2, MessageType::Assistant)).unwrap();
-    store.insert_message(&make_message("sess-ids", 3, MessageType::ToolCall)).unwrap();
+    store
+        .insert_message(&make_message("sess-ids", 1, MessageType::User))
+        .unwrap();
+    store
+        .insert_message(&make_message("sess-ids", 2, MessageType::Assistant))
+        .unwrap();
+    store
+        .insert_message(&make_message("sess-ids", 3, MessageType::ToolCall))
+        .unwrap();
 
     let msgs = store.query_messages("sess-ids").unwrap();
     assert_eq!(msgs.len(), 3);
@@ -93,14 +99,20 @@ fn message_exists_detects_duplicates() {
     let msg = make_message("sess-dedup", 1, MessageType::User);
     store.insert_message(&msg).unwrap();
 
-    // Duplicate with same anthropic_msg_id + request_id
-    assert!(store.message_exists(Some("msg_1"), Some("req_1")).unwrap());
+    // Duplicate with same session + anthropic_msg_id + request_id
+    assert!(store
+        .message_exists("sess-dedup", Some("msg_1"), Some("req_1"))
+        .unwrap());
     // Different id
     assert!(!store
-        .message_exists(Some("msg_999"), Some("req_999"))
+        .message_exists("sess-dedup", Some("msg_999"), Some("req_999"))
+        .unwrap());
+    // Same ids but different session → not a duplicate
+    assert!(!store
+        .message_exists("other-sess", Some("msg_1"), Some("req_1"))
         .unwrap());
     // None IDs
-    assert!(!store.message_exists(None, None).unwrap());
+    assert!(!store.message_exists("sess-dedup", None, None).unwrap());
 }
 
 #[test]

@@ -6,7 +6,6 @@ use ratatui::{
     Frame,
 };
 
-
 pub struct StatusBarState<'a> {
     pub watching_count: usize,
     pub session_count: usize,
@@ -31,8 +30,16 @@ pub fn render_header(state: &StatusBarState, area: Rect, frame: &mut Frame) {
         state.watching_count, state.session_count
     );
 
-    let follow_label = if state.follow_mode { "[follow]" } else { "[scroll]" };
-    let follow_color = if state.follow_mode { Color::Green } else { Color::Yellow };
+    let follow_label = if state.follow_mode {
+        "[follow]"
+    } else {
+        "[scroll]"
+    };
+    let follow_color = if state.follow_mode {
+        Color::Green
+    } else {
+        Color::Yellow
+    };
 
     let mut spans = vec![
         Span::raw(" viztokens  "),

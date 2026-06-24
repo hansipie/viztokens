@@ -46,6 +46,19 @@ pub enum Command {
         about = "Print discovered sessions as JSON and exit"
     )]
     ListSessions,
-    #[command(name = "update", about = "Update viztokens to the latest version from GitHub")]
+    #[command(
+        name = "update",
+        about = "Update viztokens to the latest version from GitHub"
+    )]
     Update,
+    #[command(
+        name = "prune-stale",
+        about = "Delete stale sessions (and their messages) from the database"
+    )]
+    PruneStale,
+    #[command(
+        name = "clear",
+        about = "Delete all sessions and messages from the database"
+    )]
+    Clear,
 }

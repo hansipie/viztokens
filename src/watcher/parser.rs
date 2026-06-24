@@ -6,7 +6,6 @@ use crate::model::{Message, MessageType};
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JsonlEntry {
-    session_id: Option<String>,
     timestamp: Option<String>,
     message: Option<JsonlMessage>,
     #[allow(dead_code)]
@@ -63,7 +62,7 @@ pub fn parse_line(line: &str, session_id: &str, sequence_num: u64) -> anyhow::Re
         None => return Ok(vec![]),
     };
 
-    let sid = entry.session_id.unwrap_or_else(|| session_id.to_string());
+    let sid = session_id.to_string();
 
     let timestamp = entry
         .timestamp
@@ -75,8 +74,14 @@ pub fn parse_line(line: &str, session_id: &str, sequence_num: u64) -> anyhow::Re
     let anthropic_msg_id = msg.id.clone();
     let request_id = entry.request_id.clone();
     let model = msg.model.clone();
-    let input_tokens = msg.usage.as_ref().map(|u| u32::try_from(u.input_tokens).unwrap_or(u32::MAX));
-    let output_tokens = msg.usage.as_ref().map(|u| u32::try_from(u.output_tokens).unwrap_or(u32::MAX));
+    let input_tokens = msg
+        .usage
+        .as_ref()
+        .map(|u| u32::try_from(u.input_tokens).unwrap_or(u32::MAX));
+    let output_tokens = msg
+        .usage
+        .as_ref()
+        .map(|u| u32::try_from(u.output_tokens).unwrap_or(u32::MAX));
 
     // User messages have content as a plain string; assistant messages use blocks.
     let (plain_text, blocks) = match msg.content {

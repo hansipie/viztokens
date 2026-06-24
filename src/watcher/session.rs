@@ -23,9 +23,7 @@ pub fn resolve_config_dir(override_path: Option<PathBuf>) -> anyhow::Result<Path
     if dot_claude.exists() {
         return Ok(dot_claude);
     }
-    anyhow::bail!(
-        "Claude config directory not found; set CLAUDE_CONFIG_DIR or create ~/.claude"
-    )
+    anyhow::bail!("Claude config directory not found; set CLAUDE_CONFIG_DIR or create ~/.claude")
 }
 
 pub fn scan_sessions(config_dir: &Path) -> Vec<DiscoveredSession> {

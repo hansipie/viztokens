@@ -9,7 +9,7 @@ use anyhow::Context;
 use notify::{EventKind, RecursiveMode, Watcher as NotifyWatcher};
 use tokio::sync::mpsc;
 
-use crate::model::Message;
+use crate::model::{Message, SessionStatus};
 use crate::store::Store;
 use session::DiscoveredSession;
 
@@ -42,8 +42,7 @@ async fn run_inner(watcher: Watcher, session: DiscoveredSession) -> anyhow::Resu
     let has_history = {
         let store = watcher.store.clone();
         let sid = session_id.clone();
-        tokio::task::spawn_blocking(move || store.count_messages(&sid))
-            .await??
+        tokio::task::spawn_blocking(move || store.count_messages(&sid)).await??
     };
     let mut offset = if has_history > 0 {
         file.seek(SeekFrom::End(0))?
@@ -58,10 +57,17 @@ async fn run_inner(watcher: Watcher, session: DiscoveredSession) -> anyhow::Resu
         .context("session file has no parent dir")?
         .to_path_buf();
 
+    let watched_path = path.clone();
     let mut watcher_handle =
         notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if let Ok(event) = res {
-                if matches!(event.kind, EventKind::Modify(_)) {
+                // Accept Modify (append) and Create/Rename-To (atomic write) on our file.
+                // Remove events are intentionally ignored: an atomic rename triggers a
+                // transient Remove on the target before the new file appears, and we must
+                // not exit the watcher loop on that.
+                let is_our_file = event.paths.iter().any(|p| p == &watched_path);
+                if is_our_file && matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_))
+                {
                     let _ = notify_tx.blocking_send(());
                 }
             }
@@ -74,9 +80,9 @@ async fn run_inner(watcher: Watcher, session: DiscoveredSession) -> anyhow::Resu
 
     loop {
         match tokio::time::timeout(Duration::from_millis(100), notify_rx.recv()).await {
-            Err(_) => continue,    // no event yet
-            Ok(None) => break,     // notify sender dropped
-            Ok(Some(())) => {}     // file modified, read below
+            Err(_) => continue, // no event yet
+            Ok(None) => break,  // notify sender dropped (watcher handle gone)
+            Ok(Some(())) => {}  // file modified or recreated, read below
         }
 
         // Read newly appended bytes
@@ -131,10 +137,11 @@ async fn run_inner(watcher: Watcher, session: DiscoveredSession) -> anyhow::Resu
                     // Dedup sidechain entries
                     if sidechain {
                         let store = watcher.store.clone();
+                        let sid = session_id.clone();
                         let mid = msg.anthropic_msg_id.clone();
                         let rid = msg.request_id.clone();
                         let exists = tokio::task::spawn_blocking(move || {
-                            store.message_exists(mid.as_deref(), rid.as_deref())
+                            store.message_exists(&sid, mid.as_deref(), rid.as_deref())
                         })
                         .await
                         .unwrap_or(Ok(false))
@@ -161,5 +168,19 @@ async fn run_inner(watcher: Watcher, session: DiscoveredSession) -> anyhow::Resu
             }
         }
     }
+
+    // Mark session stale when the watcher exits (file removed or watcher died)
+    let store = watcher.store.clone();
+    let sid = session_id.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = store.set_session_status(&sid, SessionStatus::Stale) {
+            tracing::warn!("failed to mark session {sid} as stale: {e:#}");
+        }
+    });
+    let _ = watcher
+        .tx
+        .send(WatcherEvent::SessionEnded(session_id))
+        .await;
+
     Ok(())
 }
