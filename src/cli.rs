@@ -46,4 +46,6 @@ pub enum Command {
         about = "Print discovered sessions as JSON and exit"
     )]
     ListSessions,
+    #[command(name = "update", about = "Update viztokens to the latest version from GitHub")]
+    Update,
 }

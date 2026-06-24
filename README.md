@@ -50,22 +50,18 @@ Requires Rust 1.78+ stable (`rustup update stable`) and at least one Claude Code
 
 ## Update
 
-**From crates.io**:
+Once installed, viztokens can update itself:
+
 ```bash
-cargo install viztokens
+viztokens update
 ```
 
-**From GitHub**:
+This runs `cargo install --git https://github.com/hansipie/viztokens --force` and replaces the current binary.
+
+Alternatively, the manual equivalent:
+
 ```bash
 cargo install --git https://github.com/hansipie/viztokens --force
-```
-
-**From source**:
-```bash
-cd viztokens
-git pull
-cargo build --release
-cp target/release/viztokens ~/.local/bin/
 ```
 
 ## Usage

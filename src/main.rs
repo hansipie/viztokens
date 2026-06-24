@@ -32,6 +32,19 @@ async fn main() -> anyhow::Result<()> {
 
     let store = Arc::new(Store::open(&db_path)?);
 
+    // Handle subcommands that don't need a store
+    if let Some(Command::Update) = args.command {
+        let status = std::process::Command::new("cargo")
+            .args([
+                "install",
+                "--git",
+                "https://github.com/hansipie/viztokens",
+                "--force",
+            ])
+            .status()?;
+        std::process::exit(status.code().unwrap_or(1));
+    }
+
     // Handle list-sessions subcommand
     if let Some(Command::ListSessions) = args.command {
         let sessions = store.list_sessions()?;
