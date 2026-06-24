@@ -4,25 +4,8 @@ A terminal UI that tails Claude Code's native JSONL session files and displays e
 
 Claude Code requires zero configuration changes. viztokens reads the same files [ccusage](https://github.com/ryoppippi/ccusage) uses.
 
-```
- viztokens  ● WATCHING  1/1 sessions  [follow]  filter: ALL
-┌ USER  12:34:05 ──────────────────────────────────────────────────────────┐
-│ What files are in the current directory?                                 │
-└──────────────────────────────────────────────────────────────────────────┘
-┌ TOOL CALL  12:34:06  bash ────────────────────────────────────────────────┐
-│ {                                                                         │
-│   "command": "ls -la"                                                     │
-│ }                                                                         │
-└───────────────────────────────────────────────────────────────────────────┘
-┌ TOOL RESULT  12:34:06 ────────────────────────────────────────────────────┐
-│ total 48                                                                  │
-│ drwxr-xr-x 5 user group 160 Jun 23 12:34 .                               │
-└───────────────────────────────────────────────────────────────────────────┘
-┌ ASSISTANT  12:34:07  claude-opus-4-5  in:12,450 out:312 ──────────────────┐
-│ The current directory contains the following files:                       │
-└───────────────────────────────────────────────────────────────────────────┘
- [↑↓] Scroll  [f] Filter  [End] Follow  [q] Quit  in:12,450 out:312
-```
+![viztokens demo](assets/viztokens.gif)
+
 
 ## Install
 
