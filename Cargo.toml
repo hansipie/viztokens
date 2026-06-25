@@ -3,6 +3,10 @@ name = "viztokens"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+description = "Terminal UI that tails Claude Code JSONL session files and displays harness ↔ model messages in real time"
+repository = "https://github.com/hansipie/viztokens"
+keywords = ["claude", "tui", "terminal", "ai", "monitoring"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "viztokens"
