@@ -1,4 +1,11 @@
-# viztokens
+![viztokens](assets/viztokens.png)
+
+<p align="center">
+  <a href="https://github.com/hansipie/viztokens/actions/workflows/ci.yml"><img src="https://github.com/hansipie/viztokens/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/viztokens"><img src="https://img.shields.io/crates/v/viztokens" alt="Crates.io"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.78%2B-orange.svg" alt="Rust"></a>
+</p>
 
 A terminal UI that tails Claude Code's native JSONL session files and displays every harness ↔ model message in real time — user prompts, assistant responses, tool calls, and tool results, all with full untruncated content.
 
