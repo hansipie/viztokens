@@ -1,15 +1,17 @@
 pub mod parser;
 pub mod session;
 
+use std::collections::HashSet;
 use std::io::{Read, Seek, SeekFrom};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::Context;
 use notify::{EventKind, RecursiveMode, Watcher as NotifyWatcher};
 use tokio::sync::mpsc;
 
-use crate::model::{Message, SessionStatus};
+use crate::model::{Message, Session, SessionStatus};
 use crate::store::Store;
 use session::DiscoveredSession;
 
@@ -17,6 +19,7 @@ pub enum WatcherEvent {
     Message(Message),
     ParseError(String),
     SessionEnded(String),
+    NewSession(DiscoveredSession),
 }
 
 pub struct Watcher {
@@ -181,6 +184,136 @@ async fn run_inner(watcher: Watcher, session: DiscoveredSession) -> anyhow::Resu
         .tx
         .send(WatcherEvent::SessionEnded(session_id))
         .await;
+
+    Ok(())
+}
+
+pub async fn watch_new_sessions(
+    projects_dir: PathBuf,
+    tx: mpsc::Sender<WatcherEvent>,
+    store: Arc<Store>,
+    max_age: u64,
+    initial_paths: HashSet<PathBuf>,
+) {
+    if let Err(e) = watch_new_sessions_inner(projects_dir, tx, store, max_age, initial_paths).await
+    {
+        tracing::error!("directory watcher error: {e:#}");
+    }
+}
+
+async fn watch_new_sessions_inner(
+    projects_dir: PathBuf,
+    tx: mpsc::Sender<WatcherEvent>,
+    store: Arc<Store>,
+    max_age: u64,
+    mut known_paths: HashSet<PathBuf>,
+) -> anyhow::Result<()> {
+    let (notify_tx, mut notify_rx) = tokio::sync::mpsc::channel::<PathBuf>(16);
+
+    let mut dir_watcher =
+        notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res {
+                if matches!(event.kind, EventKind::Create(_)) {
+                    for path in event.paths {
+                        if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                            let _ = notify_tx.blocking_send(path);
+                        }
+                    }
+                }
+            }
+        })?;
+    dir_watcher.watch(&projects_dir, RecursiveMode::Recursive)?;
+
+    loop {
+        match notify_rx.recv().await {
+            None => break,
+            Some(path) => {
+                if known_paths.contains(&path) {
+                    continue;
+                }
+                known_paths.insert(path.clone());
+
+                if max_age > 0 {
+                    let cutoff = Duration::from_secs(max_age * 60);
+                    let fresh = path
+                        .metadata()
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.elapsed().ok())
+                        .map(|age| age <= cutoff)
+                        .unwrap_or(true);
+                    if !fresh {
+                        continue;
+                    }
+                }
+
+                let session_id = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                let project_name = path
+                    .parent()
+                    .and_then(|p| {
+                        if p == projects_dir {
+                            None
+                        } else {
+                            p.strip_prefix(&projects_dir)
+                                .ok()
+                                .and_then(|rel| rel.iter().next())
+                                .and_then(|c| c.to_str())
+                                .map(|s| s.to_string())
+                        }
+                    })
+                    .unwrap_or_else(|| "default".to_string());
+
+                let last_modified = path
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(SystemTime::UNIX_EPOCH);
+
+                let ds = DiscoveredSession {
+                    session_id: session_id.clone(),
+                    project_name,
+                    file_path: path,
+                    last_modified,
+                };
+
+                let session = Session {
+                    id: ds.session_id.clone(),
+                    project_name: ds.project_name.clone(),
+                    file_path: ds.file_path.clone(),
+                    first_seen_at: chrono::Utc::now(),
+                    last_seen_at: chrono::Utc::now(),
+                    status: SessionStatus::Watching,
+                    message_count: 0,
+                };
+                let store2 = store.clone();
+                let sid = ds.session_id.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _ = store2.insert_session(&session);
+                    let _ = store2.set_session_status(&sid, SessionStatus::Watching);
+                })
+                .await
+                .ok();
+
+                tracing::info!("new session detected: {session_id}");
+
+                if tx.send(WatcherEvent::NewSession(ds.clone())).await.is_err() {
+                    break;
+                }
+
+                tokio::spawn(run(
+                    Watcher {
+                        tx: tx.clone(),
+                        store: store.clone(),
+                    },
+                    ds,
+                ));
+            }
+        }
+    }
 
     Ok(())
 }

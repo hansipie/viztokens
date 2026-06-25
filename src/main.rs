@@ -11,7 +11,7 @@ use viztokens::model::{Session, SessionStatus};
 use viztokens::store::Store;
 use viztokens::tui::{init_terminal, run, App};
 use viztokens::watcher::session::{resolve_config_dir, scan_sessions};
-use viztokens::watcher::{run as watcher_run, Watcher};
+use viztokens::watcher::{run as watcher_run, watch_new_sessions, Watcher};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -343,6 +343,19 @@ async fn main() -> anyhow::Result<()> {
             store: store.clone(),
         };
         tokio::spawn(watcher_run(watcher, ds.clone()));
+    }
+
+    // Spawn directory watcher to pick up new sessions created after startup
+    {
+        let initial_paths = discovered.iter().map(|ds| ds.file_path.clone()).collect();
+        let projects_dir = config_dir.join("projects");
+        tokio::spawn(watch_new_sessions(
+            projects_dir,
+            tx.clone(),
+            store.clone(),
+            args.max_age,
+            initial_paths,
+        ));
     }
 
     // Load history from all discovered sessions, sorted by timestamp

@@ -203,6 +203,12 @@ fn run_loop(
                 WatcherEvent::SessionEnded(_) => {
                     app.watching_count = app.watching_count.saturating_sub(1);
                 }
+                WatcherEvent::NewSession(ds) => {
+                    app.session_projects
+                        .insert(ds.session_id.clone(), ds.project_name.clone());
+                    app.session_count += 1;
+                    app.watching_count += 1;
+                }
             }
         }
 
