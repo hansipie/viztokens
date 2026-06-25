@@ -30,7 +30,7 @@ pub fn scan_sessions(config_dir: &Path) -> Vec<DiscoveredSession> {
     let projects_dir = config_dir.join("projects");
     let mut sessions = Vec::new();
     scan_dir(&projects_dir, &projects_dir, &mut sessions);
-    sessions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+    sessions.sort_by_key(|s| std::cmp::Reverse(s.last_modified));
     sessions
 }
 
