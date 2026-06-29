@@ -6,12 +6,91 @@ use tracing_subscriber::EnvFilter;
 
 use std::io::Write;
 
+use viztokens::claude::session::{resolve_config_dir, scan_sessions};
+use viztokens::claude::{run as claude_run, watch_new_sessions};
 use viztokens::cli::{Args, Command};
+use viztokens::hermes;
 use viztokens::model::{Session, SessionStatus};
 use viztokens::store::Store;
 use viztokens::tui::{init_terminal, run, App};
-use viztokens::watcher::session::{resolve_config_dir, scan_sessions};
-use viztokens::watcher::{run as watcher_run, watch_new_sessions, Watcher};
+use viztokens::watcher::Watcher;
+
+fn print_sessions_table(sessions: &[Session], show_status: bool) {
+    let w_id = sessions.iter().map(|s| s.id.len()).max().unwrap_or(0).max(2);
+    let w_proj = sessions
+        .iter()
+        .map(|s| s.project_name.len())
+        .max()
+        .unwrap_or(0)
+        .max(7);
+    let w_last = 19usize;
+    let w_msgs = sessions
+        .iter()
+        .map(|s| s.message_count.to_string().len())
+        .max()
+        .unwrap_or(0)
+        .max(4);
+
+    if show_status {
+        let w_status = sessions
+            .iter()
+            .map(|s| format!("{:?}", s.status).len())
+            .max()
+            .unwrap_or(0)
+            .max(6);
+        let sep = format!(
+            " {0}  {1}  {2}  {3}  {4}",
+            "─".repeat(w_id),
+            "─".repeat(w_proj),
+            "─".repeat(w_last),
+            "─".repeat(w_status),
+            "─".repeat(w_msgs),
+        );
+        println!(
+            " {:<w_id$}  {:<w_proj$}  {:<w_last$}  {:<w_status$}  {:>w_msgs$}",
+            "ID", "Project", "Last seen", "Status", "Msgs",
+            w_id = w_id, w_proj = w_proj, w_last = w_last, w_status = w_status, w_msgs = w_msgs,
+        );
+        println!("{sep}");
+        for s in sessions {
+            println!(
+                " {:<w_id$}  {:<w_proj$}  {:<w_last$}  {:<w_status$}  {:>w_msgs$}",
+                s.id,
+                s.project_name,
+                s.last_seen_at.format("%Y-%m-%d %H:%M:%S"),
+                format!("{:?}", s.status).to_lowercase(),
+                s.message_count,
+                w_id = w_id, w_proj = w_proj, w_last = w_last, w_status = w_status, w_msgs = w_msgs,
+            );
+        }
+        println!("{sep}");
+    } else {
+        let sep = format!(
+            " {0}  {1}  {2}  {3}",
+            "─".repeat(w_id),
+            "─".repeat(w_proj),
+            "─".repeat(w_last),
+            "─".repeat(w_msgs),
+        );
+        println!(
+            " {:<w_id$}  {:<w_proj$}  {:<w_last$}  {:>w_msgs$}",
+            "ID", "Project", "Last seen", "Msgs",
+            w_id = w_id, w_proj = w_proj, w_last = w_last, w_msgs = w_msgs,
+        );
+        println!("{sep}");
+        for s in sessions {
+            println!(
+                " {:<w_id$}  {:<w_proj$}  {:<w_last$}  {:>w_msgs$}",
+                s.id,
+                s.project_name,
+                s.last_seen_at.format("%Y-%m-%d %H:%M:%S"),
+                s.message_count,
+                w_id = w_id, w_proj = w_proj, w_last = w_last, w_msgs = w_msgs,
+            );
+        }
+        println!("{sep}");
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -62,56 +141,7 @@ async fn main() -> anyhow::Result<()> {
             return Ok(());
         }
 
-        // Compute column widths
-        let w_id = stale.iter().map(|s| s.id.len()).max().unwrap_or(0).max(2);
-        let w_proj = stale
-            .iter()
-            .map(|s| s.project_name.len())
-            .max()
-            .unwrap_or(0)
-            .max(7);
-        let w_last = 19; // "YYYY-MM-DD HH:MM:SS"
-        let w_msgs = stale
-            .iter()
-            .map(|s| s.message_count.to_string().len())
-            .max()
-            .unwrap_or(0)
-            .max(4);
-
-        let sep = format!(
-            " {0}  {1}  {2}  {3}",
-            "─".repeat(w_id),
-            "─".repeat(w_proj),
-            "─".repeat(w_last),
-            "─".repeat(w_msgs),
-        );
-
-        println!(
-            " {:<w_id$}  {:<w_proj$}  {:<w_last$}  {:>w_msgs$}",
-            "ID",
-            "Project",
-            "Last seen",
-            "Msgs",
-            w_id = w_id,
-            w_proj = w_proj,
-            w_last = w_last,
-            w_msgs = w_msgs,
-        );
-        println!("{sep}");
-        for s in &stale {
-            println!(
-                " {:<w_id$}  {:<w_proj$}  {:<w_last$}  {:>w_msgs$}",
-                s.id,
-                s.project_name,
-                s.last_seen_at.format("%Y-%m-%d %H:%M:%S"),
-                s.message_count,
-                w_id = w_id,
-                w_proj = w_proj,
-                w_last = w_last,
-                w_msgs = w_msgs,
-            );
-        }
-        println!("{sep}");
+        print_sessions_table(&stale, false);
         println!(" {} session(s) will be deleted.", stale.len());
 
         print!("\nDelete? [y/N] ");
@@ -135,65 +165,7 @@ async fn main() -> anyhow::Result<()> {
             return Ok(());
         }
 
-        let w_id = sessions
-            .iter()
-            .map(|s| s.id.len())
-            .max()
-            .unwrap_or(0)
-            .max(2);
-        let w_proj = sessions
-            .iter()
-            .map(|s| s.project_name.len())
-            .max()
-            .unwrap_or(0)
-            .max(7);
-        let w_last = 19;
-        let w_status = 8;
-        let w_msgs = sessions
-            .iter()
-            .map(|s| s.message_count.to_string().len())
-            .max()
-            .unwrap_or(0)
-            .max(4);
-
-        let sep = format!(
-            " {0}  {1}  {2}  {3}  {4}",
-            "─".repeat(w_id),
-            "─".repeat(w_proj),
-            "─".repeat(w_last),
-            "─".repeat(w_status),
-            "─".repeat(w_msgs),
-        );
-        println!(
-            " {:<w_id$}  {:<w_proj$}  {:<w_last$}  {:<w_status$}  {:>w_msgs$}",
-            "ID",
-            "Project",
-            "Last seen",
-            "Status",
-            "Msgs",
-            w_id = w_id,
-            w_proj = w_proj,
-            w_last = w_last,
-            w_status = w_status,
-            w_msgs = w_msgs,
-        );
-        println!("{sep}");
-        for s in &sessions {
-            println!(
-                " {:<w_id$}  {:<w_proj$}  {:<w_last$}  {:<w_status$}  {:>w_msgs$}",
-                s.id,
-                s.project_name,
-                s.last_seen_at.format("%Y-%m-%d %H:%M:%S"),
-                format!("{:?}", s.status).to_lowercase(),
-                s.message_count,
-                w_id = w_id,
-                w_proj = w_proj,
-                w_last = w_last,
-                w_status = w_status,
-                w_msgs = w_msgs,
-            );
-        }
-        println!("{sep}");
+        print_sessions_table(&sessions, true);
 
         let msg_count: u64 = sessions.iter().map(|s| s.message_count).sum();
         println!(
@@ -222,108 +194,76 @@ async fn main() -> anyhow::Result<()> {
             return Ok(());
         }
 
-        let w_id = sessions
-            .iter()
-            .map(|s| s.id.len())
-            .max()
-            .unwrap_or(0)
-            .max(2);
-        let w_proj = sessions
-            .iter()
-            .map(|s| s.project_name.len())
-            .max()
-            .unwrap_or(0)
-            .max(7);
-        let w_last = 19;
-        let w_status = sessions
-            .iter()
-            .map(|s| format!("{:?}", s.status).len())
-            .max()
-            .unwrap_or(0)
-            .max(6);
-        let w_msgs = sessions
-            .iter()
-            .map(|s| s.message_count.to_string().len())
-            .max()
-            .unwrap_or(0)
-            .max(4);
-
-        let sep = format!(
-            " {0}  {1}  {2}  {3}  {4}",
-            "─".repeat(w_id),
-            "─".repeat(w_proj),
-            "─".repeat(w_last),
-            "─".repeat(w_status),
-            "─".repeat(w_msgs),
-        );
-
-        println!(
-            " {:<w_id$}  {:<w_proj$}  {:<w_last$}  {:<w_status$}  {:>w_msgs$}",
-            "ID",
-            "Project",
-            "Last seen",
-            "Status",
-            "Msgs",
-            w_id = w_id,
-            w_proj = w_proj,
-            w_last = w_last,
-            w_status = w_status,
-            w_msgs = w_msgs,
-        );
-        println!("{sep}");
-        for s in &sessions {
-            println!(
-                " {:<w_id$}  {:<w_proj$}  {:<w_last$}  {:<w_status$}  {:>w_msgs$}",
-                s.id,
-                s.project_name,
-                s.last_seen_at.format("%Y-%m-%d %H:%M:%S"),
-                format!("{:?}", s.status).to_lowercase(),
-                s.message_count,
-                w_id = w_id,
-                w_proj = w_proj,
-                w_last = w_last,
-                w_status = w_status,
-                w_msgs = w_msgs,
-            );
-        }
-        println!("{sep}");
+        print_sessions_table(&sessions, true);
         println!(" {} session(s)", sessions.len());
         return Ok(());
     }
 
-    // Discover sessions
-    let config_dir = resolve_config_dir(args.config_dir)?;
-    let mut discovered = scan_sessions(&config_dir);
+    // ── Discover Claude Code sessions ──────────────────────────────────────
+    let (mut discovered, claude_config_dir) =
+        match resolve_config_dir(args.config_dir.clone()) {
+            Ok(config_dir) => {
+                let mut sessions = scan_sessions(&config_dir);
+                if args.max_age > 0 {
+                    let cutoff = std::time::Duration::from_secs(args.max_age * 60);
+                    sessions.retain(|s| {
+                        s.last_modified
+                            .elapsed()
+                            .map(|age| age <= cutoff)
+                            .unwrap_or(false)
+                    });
+                }
+                if let Some(ref project) = args.project {
+                    sessions.retain(|s| &s.project_name == project);
+                }
+                if let Some(ref session_id) = args.session {
+                    sessions.retain(|s| s.session_id == *session_id);
+                }
+                (sessions, Some(config_dir))
+            }
+            Err(e) => {
+                tracing::warn!("Claude config dir unavailable: {e:#}");
+                (vec![], None)
+            }
+        };
 
-    // Filter by age unless --max-age 0
-    if args.max_age > 0 {
-        let cutoff = std::time::Duration::from_secs(args.max_age * 60);
-        discovered.retain(|s| {
-            s.last_modified
-                .elapsed()
-                .map(|age| age <= cutoff)
-                .unwrap_or(false)
-        });
+    // ── Discover Hermes sessions ────────────────────────────────────────────
+    // Use explicit --hermes-db, otherwise auto-detect ~/.hermes/state.db when present
+    let hermes_db = args
+        .hermes_db
+        .clone()
+        .or_else(|| hermes::default_db_path().filter(|p| p.exists()));
+
+    let mut hermes_discovered = Vec::new();
+    if let Some(ref db_path) = hermes_db {
+        match hermes::discover_sessions(db_path) {
+            Ok(mut sessions) => {
+                if args.max_age > 0 {
+                    let cutoff = std::time::Duration::from_secs(args.max_age * 60);
+                    sessions.retain(|s| {
+                        s.last_modified
+                            .elapsed()
+                            .map(|age| age <= cutoff)
+                            .unwrap_or(false)
+                    });
+                }
+                if let Some(ref project) = args.project {
+                    sessions.retain(|s| &s.project_name == project);
+                }
+                if let Some(ref session_id) = args.session {
+                    sessions.retain(|s| s.session_id == *session_id);
+                }
+                hermes_discovered = sessions;
+            }
+            Err(e) => tracing::warn!("Hermes sessions unavailable: {e:#}"),
+        }
     }
 
-    // Filter by project if requested
-    if let Some(ref project) = args.project {
-        discovered.retain(|s| &s.project_name == project);
+    if discovered.is_empty() && hermes_discovered.is_empty() {
+        anyhow::bail!("no sessions found (Claude Code or Hermes)");
     }
 
-    // Filter by session if requested
-    if let Some(ref session_id) = args.session {
-        discovered.retain(|s| s.session_id == *session_id);
-    }
-
-    if discovered.is_empty() {
-        anyhow::bail!(
-            "no Claude Code session files found in {}",
-            config_dir.display()
-        );
-    }
-
-    // Register all sessions and spawn one watcher per session
+    // ── Register sessions and spawn watchers ───────────────────────────────
     let (tx, rx) = tokio::sync::mpsc::channel(256);
 
     for ds in &discovered {
@@ -342,11 +282,47 @@ async fn main() -> anyhow::Result<()> {
             tx: tx.clone(),
             store: store.clone(),
         };
-        tokio::spawn(watcher_run(watcher, ds.clone()));
+        tokio::spawn(claude_run(watcher, ds.clone()));
     }
 
-    // Spawn directory watcher to pick up new sessions created after startup
-    {
+    for ds in &hermes_discovered {
+        let session = Session {
+            id: ds.session_id.clone(),
+            project_name: ds.project_name.clone(),
+            file_path: ds.file_path.clone(),
+            first_seen_at: chrono::Utc::now(),
+            last_seen_at: chrono::Utc::now(),
+            status: SessionStatus::Watching,
+            message_count: 0,
+        };
+        store.insert_session(&session)?;
+        store.set_session_status(&ds.session_id, SessionStatus::Watching)?;
+        let watcher = Watcher {
+            tx: tx.clone(),
+            store: store.clone(),
+        };
+        tokio::spawn(hermes::run(watcher, ds.clone(), hermes_db.clone().unwrap()));
+    }
+
+    // Spawn DB watcher to pick up new Hermes sessions created after startup
+    if let Some(ref hdb) = hermes_db {
+        let initial_ids = hermes_discovered
+            .iter()
+            .map(|ds| ds.session_id.clone())
+            .collect();
+        tokio::spawn(hermes::watch_new_sessions(
+            hdb.clone(),
+            tx.clone(),
+            store.clone(),
+            args.max_age,
+            initial_ids,
+        ));
+    }
+
+    discovered.extend(hermes_discovered);
+
+    // Spawn directory watcher to pick up new Claude sessions created after startup
+    if let Some(config_dir) = claude_config_dir {
         let initial_paths = discovered.iter().map(|ds| ds.file_path.clone()).collect();
         let projects_dir = config_dir.join("projects");
         tokio::spawn(watch_new_sessions(

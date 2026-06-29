@@ -3,13 +3,7 @@ use std::time::SystemTime;
 
 use anyhow::Context;
 
-#[derive(Debug, Clone)]
-pub struct DiscoveredSession {
-    pub session_id: String,
-    pub project_name: String,
-    pub file_path: PathBuf,
-    pub last_modified: SystemTime,
-}
+use crate::watcher::DiscoveredSession;
 
 pub fn resolve_config_dir(override_path: Option<PathBuf>) -> anyhow::Result<PathBuf> {
     if let Some(p) = override_path {
@@ -64,7 +58,6 @@ fn scan_dir(root: &Path, dir: &Path, out: &mut Vec<DiscoveredSession>) {
                     if p == root {
                         None
                     } else {
-                        // Use the immediate parent relative to projects root
                         p.strip_prefix(root)
                             .ok()
                             .and_then(|rel| rel.iter().next())
@@ -77,6 +70,7 @@ fn scan_dir(root: &Path, dir: &Path, out: &mut Vec<DiscoveredSession>) {
             out.push(DiscoveredSession {
                 session_id,
                 project_name,
+                harness: "claude".to_string(),
                 file_path: path,
                 last_modified,
             });

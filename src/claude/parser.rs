@@ -112,6 +112,7 @@ pub fn parse_line(line: &str, session_id: &str, sequence_num: u64) -> anyhow::Re
             request_id,
             input_tokens,
             output_tokens,
+            tokens_estimated: false,
             model,
         }]);
     }
@@ -122,6 +123,9 @@ pub fn parse_line(line: &str, session_id: &str, sequence_num: u64) -> anyhow::Re
 
     let mut messages = Vec::new();
     let mut local_seq = sequence_num;
+    // usage belongs to the API call, not individual blocks — assign only to the first message.
+    let mut remaining_input = input_tokens;
+    let mut remaining_output = output_tokens;
 
     for block in &blocks {
         match block.block_type.as_str() {
@@ -145,8 +149,9 @@ pub fn parse_line(line: &str, session_id: &str, sequence_num: u64) -> anyhow::Re
                     tool_use_id: None,
                     anthropic_msg_id: anthropic_msg_id.clone(),
                     request_id: request_id.clone(),
-                    input_tokens,
-                    output_tokens,
+                    input_tokens: remaining_input.take(),
+                    output_tokens: remaining_output.take(),
+                    tokens_estimated: false,
                     model: model.clone(),
                 });
                 local_seq += 1;
@@ -170,8 +175,9 @@ pub fn parse_line(line: &str, session_id: &str, sequence_num: u64) -> anyhow::Re
                     tool_use_id,
                     anthropic_msg_id: anthropic_msg_id.clone(),
                     request_id: request_id.clone(),
-                    input_tokens,
-                    output_tokens,
+                    input_tokens: remaining_input.take(),
+                    output_tokens: remaining_output.take(),
+                    tokens_estimated: false,
                     model: model.clone(),
                 });
                 local_seq += 1;
@@ -197,8 +203,9 @@ pub fn parse_line(line: &str, session_id: &str, sequence_num: u64) -> anyhow::Re
                     tool_use_id,
                     anthropic_msg_id: anthropic_msg_id.clone(),
                     request_id: request_id.clone(),
-                    input_tokens,
-                    output_tokens,
+                    input_tokens: remaining_input.take(),
+                    output_tokens: remaining_output.take(),
+                    tokens_estimated: false,
                     model: model.clone(),
                 });
                 local_seq += 1;

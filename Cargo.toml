@@ -1,6 +1,6 @@
 [package]
 name = "viztokens"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "Terminal UI that tails Claude Code JSONL session files and displays harness ↔ model messages in real time"
@@ -48,6 +48,7 @@ clap = { version = "4", features = ["derive", "env"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
+tiktoken-rs = "0.6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

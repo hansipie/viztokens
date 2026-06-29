@@ -18,8 +18,27 @@ use ratatui::Terminal;
 use tokio::sync::mpsc;
 
 use crate::model::{Message, MessageFilter, MessageType};
+
+fn fill_estimated_tokens(msg: &mut Message) {
+    if msg.input_tokens.is_some() || msg.output_tokens.is_some() {
+        return;
+    }
+    let bpe = msg
+        .model
+        .as_deref()
+        .and_then(|m| tiktoken_rs::get_bpe_from_model(m).ok())
+        .or_else(|| tiktoken_rs::o200k_base().ok());
+    if let Some(bpe) = bpe {
+        let count = bpe.encode_with_special_tokens(&msg.content).len() as u32;
+        match msg.message_type {
+            MessageType::User => msg.input_tokens = Some(count),
+            _ => msg.output_tokens = Some(count),
+        }
+        msg.tokens_estimated = true;
+    }
+}
 use crate::store::Store;
-use crate::watcher::session::DiscoveredSession;
+use crate::watcher::DiscoveredSession;
 use crate::watcher::WatcherEvent;
 use events::{handle_key, AppAction};
 use widgets::message_list::render_message_list;
@@ -28,6 +47,9 @@ use widgets::status_bar::{render_footer, render_header, StatusBarState};
 pub struct App {
     pub messages: Vec<Message>,
     pub session_projects: HashMap<String, String>,
+    pub session_harnesses: HashMap<String, String>,
+    /// Session-level token totals (used by adapters without per-message counts).
+    pub session_tokens: HashMap<String, (u64, u64)>,
     pub session_count: usize,
     pub watching_count: usize,
     pub parse_errors: u32,
@@ -53,10 +75,16 @@ impl App {
             .iter()
             .map(|s| (s.session_id.clone(), s.project_name.clone()))
             .collect();
+        let session_harnesses: HashMap<String, String> = sessions
+            .iter()
+            .map(|s| (s.session_id.clone(), s.harness.clone()))
+            .collect();
         let session_count = sessions.len();
         App {
             messages: history,
             session_projects,
+            session_harnesses,
+            session_tokens: HashMap::new(),
             session_count,
             watching_count: session_count,
             parse_errors: 0,
@@ -135,8 +163,14 @@ impl App {
             AppAction::PageDown => self.scroll_down(page_size),
             AppAction::ScrollTop => self.scroll_to_top(),
             AppAction::ScrollBottom => self.scroll_to_bottom(),
-            AppAction::CycleFilter => self.cycle_filter(),
-            AppAction::ClearFilter => self.filter.clear(),
+            AppAction::CycleFilter => {
+                self.cycle_filter();
+                self.follow_mode = true;
+            }
+            AppAction::ClearFilter => {
+                self.filter.clear();
+                self.follow_mode = true;
+            }
             AppAction::ToggleType(t) => {
                 if t == MessageType::ToolCall {
                     self.filter.toggle(MessageType::ToolCall);
@@ -144,6 +178,7 @@ impl App {
                 } else {
                     self.filter.toggle(t);
                 }
+                self.follow_mode = true;
             }
             AppAction::Quit | AppAction::Noop => {}
         }
@@ -191,7 +226,8 @@ fn run_loop(
         // Drain incoming watcher events
         while let Ok(evt) = app.rx.try_recv() {
             match evt {
-                WatcherEvent::Message(msg) => {
+                WatcherEvent::Message(mut msg) => {
+                    fill_estimated_tokens(&mut msg);
                     app.messages.push(msg);
                     if app.follow_mode {
                         app.scroll_to_bottom();
@@ -206,8 +242,17 @@ fn run_loop(
                 WatcherEvent::NewSession(ds) => {
                     app.session_projects
                         .insert(ds.session_id.clone(), ds.project_name.clone());
+                    app.session_harnesses
+                        .insert(ds.session_id.clone(), ds.harness.clone());
                     app.session_count += 1;
                     app.watching_count += 1;
+                }
+                WatcherEvent::TokensUpdate {
+                    session_id,
+                    input_tokens,
+                    output_tokens,
+                } => {
+                    app.session_tokens.insert(session_id, (input_tokens, output_tokens));
                 }
             }
         }
@@ -252,16 +297,25 @@ fn run_loop(
                 ])
                 .split(frame.area());
 
-            let (total_input_tokens, total_output_tokens) = app
+            // For sessions with a session-level total (e.g. Hermes), skip per-message
+            // counts — the session total is authoritative and already covers them.
+            let (msg_input, msg_output) = app
                 .messages
                 .iter()
                 .filter(|m| app.filter.allows(&m.message_type))
+                .filter(|m| !app.session_tokens.contains_key(&m.session_id))
                 .fold((0u64, 0u64), |(i, o), m| {
                     (
                         i + m.input_tokens.unwrap_or(0) as u64,
                         o + m.output_tokens.unwrap_or(0) as u64,
                     )
                 });
+            let (session_input, session_output) = app
+                .session_tokens
+                .values()
+                .fold((0u64, 0u64), |(i, o), (si, so)| (i + si, o + so));
+            let total_input_tokens = msg_input + session_input;
+            let total_output_tokens = msg_output + session_output;
 
             let state = StatusBarState {
                 watching_count: app.watching_count,
@@ -279,6 +333,7 @@ fn run_loop(
                 frame,
                 app.scroll_offset,
                 &app.session_projects,
+                &app.session_harnesses,
             );
             render_footer(&state, chunks[2], frame);
         })?;

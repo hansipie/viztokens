@@ -34,6 +34,7 @@ fn make_msg(seq: u64, mt: MessageType, content: &str) -> Message {
         request_id: None,
         input_tokens: None,
         output_tokens: None,
+        tokens_estimated: false,
         model: None,
     }
 }

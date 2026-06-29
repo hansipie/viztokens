@@ -25,6 +25,7 @@ pub struct Message {
     pub request_id: Option<String>,
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
+    pub tokens_estimated: bool,
     pub model: Option<String>,
 }
 

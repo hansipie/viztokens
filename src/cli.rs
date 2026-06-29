@@ -35,6 +35,9 @@ pub struct Args {
     )]
     pub max_age: u64,
 
+    #[arg(long, help = "Hermes state.db path (default: ~/.hermes/state.db if present)", env = "HERMES_DB")]
+    pub hermes_db: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }

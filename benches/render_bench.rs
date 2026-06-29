@@ -3,7 +3,7 @@ use ratatui::{backend::TestBackend, Terminal};
 
 use viztokens::model::{Message, MessageType};
 use viztokens::tui::widgets::message_list::render_message_list;
-use viztokens::watcher::parser::parse_line;
+use viztokens::claude::parser::parse_line;
 
 fn make_messages(n: usize) -> Vec<Message> {
     let types = [
@@ -31,6 +31,7 @@ fn make_messages(n: usize) -> Vec<Message> {
             request_id: None,
             input_tokens: Some(10),
             output_tokens: Some(5),
+            tokens_estimated: false,
             model: Some("claude-sonnet-4-6".to_string()),
         })
         .collect()
@@ -60,6 +61,7 @@ fn bench_render(c: &mut Criterion) {
                             f.area(),
                             f,
                             0,
+                            &std::collections::HashMap::new(),
                             &std::collections::HashMap::new(),
                         );
                     })

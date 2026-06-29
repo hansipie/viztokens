@@ -50,6 +50,7 @@ pub fn render_message_list(
     frame: &mut Frame,
     scroll_offset: usize,
     session_projects: &HashMap<String, String>,
+    session_harnesses: &HashMap<String, String>,
 ) {
     if area.height == 0 || area.width == 0 {
         return;
@@ -75,7 +76,11 @@ pub fn render_message_list(
         }
 
         let color = type_color(&msg.message_type);
-        let label = type_label(&msg.message_type);
+        let harness_prefix = session_harnesses
+            .get(&msg.session_id)
+            .map(|h| format!("{} ", h))
+            .unwrap_or_default();
+        let label = format!("{}{}", harness_prefix, type_label(&msg.message_type));
         let tool_suffix = msg
             .tool_name
             .as_deref()
@@ -91,14 +96,15 @@ pub fn render_message_list(
             .as_deref()
             .map(|m| format!("  {}", m))
             .unwrap_or_default();
+        let tilde = if msg.tokens_estimated { "~" } else { "" };
         let token_suffix = match (msg.input_tokens, msg.output_tokens) {
             (Some(i), Some(o)) => format!(
-                "  in:{} out:{}",
-                super::fmt_num(i as u64),
-                super::fmt_num(o as u64)
+                "  {}in:{} {}out:{}",
+                tilde, super::fmt_num(i as u64),
+                tilde, super::fmt_num(o as u64)
             ),
-            (Some(i), None) => format!("  in:{}", super::fmt_num(i as u64)),
-            (None, Some(o)) => format!("  out:{}", super::fmt_num(o as u64)),
+            (Some(i), None) => format!("  {}in:{}", tilde, super::fmt_num(i as u64)),
+            (None, Some(o)) => format!("  {}out:{}", tilde, super::fmt_num(o as u64)),
             (None, None) => String::new(),
         };
         let title = format!(
@@ -183,6 +189,7 @@ mod tests {
             request_id: None,
             input_tokens: None,
             output_tokens: None,
+            tokens_estimated: false,
             model: None,
         }
     }

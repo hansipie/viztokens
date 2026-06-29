@@ -2,7 +2,7 @@ use std::path::Path;
 
 use viztokens::model::{Message, MessageType, Session, SessionStatus};
 use viztokens::store::Store;
-use viztokens::watcher::session::resolve_config_dir;
+use viztokens::claude::session::resolve_config_dir;
 
 fn open_memory_store() -> Store {
     Store::open(Path::new(":memory:")).unwrap()
@@ -34,6 +34,7 @@ fn make_message(session_id: &str, seq: u64, mt: MessageType) -> Message {
         request_id: Some(format!("req_{}", seq)),
         input_tokens: Some(10),
         output_tokens: Some(5),
+        tokens_estimated: false,
         model: Some("claude-sonnet-4-6".to_string()),
     }
 }

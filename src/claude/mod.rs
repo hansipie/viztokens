@@ -1,0 +1,310 @@
+pub mod parser;
+pub mod session;
+
+use std::collections::HashSet;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+
+use anyhow::Context;
+use notify::{EventKind, RecursiveMode, Watcher as NotifyWatcher};
+use tokio::sync::mpsc;
+
+use crate::model::{Session, SessionStatus};
+use crate::store::Store;
+use crate::watcher::{DiscoveredSession, Watcher, WatcherEvent};
+use parser::{is_sidechain, parse_line};
+
+pub async fn run(watcher: Watcher, session: DiscoveredSession) {
+    if let Err(e) = run_inner(watcher, session).await {
+        tracing::error!("watcher error: {e:#}");
+    }
+}
+
+async fn run_inner(watcher: Watcher, session: DiscoveredSession) -> anyhow::Result<()> {
+    let path = session.file_path.clone();
+    let session_id = session.session_id.clone();
+
+    let mut file =
+        std::fs::File::open(&path).with_context(|| format!("opening {}", path.display()))?;
+
+    // If SQLite already has messages for this session, tail from the end.
+    // On first run (empty DB), read from the beginning to replay the full JSONL file.
+    let has_history = {
+        let store = watcher.store.clone();
+        let sid = session_id.clone();
+        tokio::task::spawn_blocking(move || store.count_messages(&sid)).await??
+    };
+    let mut offset = if has_history > 0 {
+        file.seek(SeekFrom::End(0))?
+    } else {
+        0u64
+    };
+
+    let (notify_tx, mut notify_rx) = tokio::sync::mpsc::channel::<()>(16);
+
+    let watch_dir = path
+        .parent()
+        .context("session file has no parent dir")?
+        .to_path_buf();
+
+    let watched_path = path.clone();
+    let mut watcher_handle =
+        notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res {
+                // Accept Modify (append) and Create/Rename-To (atomic write) on our file.
+                // Remove events are intentionally ignored: an atomic rename triggers a
+                // transient Remove on the target before the new file appears, and we must
+                // not exit the watcher loop on that.
+                let is_our_file = event.paths.iter().any(|p| p == &watched_path);
+                if is_our_file && matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_))
+                {
+                    let _ = notify_tx.blocking_send(());
+                }
+            }
+        })?;
+    watcher_handle.watch(&watch_dir, RecursiveMode::NonRecursive)?;
+
+    let mut sequence_num: u64 = 1;
+    let mut buf = String::new();
+    let mut partial = String::new();
+
+    loop {
+        match tokio::time::timeout(Duration::from_millis(100), notify_rx.recv()).await {
+            Err(_) => continue, // no event yet
+            Ok(None) => break,  // notify sender dropped (watcher handle gone)
+            Ok(Some(())) => {}  // file modified or recreated, read below
+        }
+
+        // Read newly appended bytes
+        file.seek(SeekFrom::Start(offset))?;
+        buf.clear();
+        let bytes_read = match file.read_to_string(&mut buf) {
+            Ok(n) => n as u64,
+            Err(_) => {
+                // Non-UTF-8: re-seek to reset cursor, then read raw bytes
+                file.seek(SeekFrom::Start(offset))?;
+                let mut raw = Vec::new();
+                let n = file.read_to_end(&mut raw).unwrap_or(0);
+                buf = raw.iter().map(|b| format!("\\x{b:02x}")).collect();
+                n as u64
+            }
+        };
+
+        if !buf.is_empty() {
+            offset += bytes_read;
+            partial.push_str(&buf);
+
+            // Split on newlines, keeping incomplete trailing line in partial
+            let ends_with_newline = partial.ends_with('\n');
+            let mut lines: Vec<String> = partial.split('\n').map(str::to_owned).collect();
+            partial = if ends_with_newline {
+                String::new()
+            } else {
+                lines.pop().unwrap_or_default()
+            };
+
+            for line in &lines {
+                let line = line.as_str();
+                if line.is_empty() {
+                    continue;
+                }
+
+                let sidechain = is_sidechain(line);
+
+                let msgs = match parse_line(line, &session_id, sequence_num) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::warn!("parse error: {e} — line: {}", &line[..line.len().min(200)]);
+                        let _ = watcher
+                            .tx
+                            .send(WatcherEvent::ParseError(format!("{e}")))
+                            .await;
+                        continue;
+                    }
+                };
+
+                for msg in msgs {
+                    // Dedup sidechain entries
+                    if sidechain {
+                        let store = watcher.store.clone();
+                        let sid = session_id.clone();
+                        let mid = msg.anthropic_msg_id.clone();
+                        let rid = msg.request_id.clone();
+                        let exists = tokio::task::spawn_blocking(move || {
+                            store.message_exists(&sid, mid.as_deref(), rid.as_deref())
+                        })
+                        .await
+                        .unwrap_or(Ok(false))
+                        .unwrap_or(false);
+                        if exists {
+                            continue;
+                        }
+                    }
+
+                    sequence_num += 1;
+
+                    let store = watcher.store.clone();
+                    let msg_clone = msg.clone();
+                    tokio::task::spawn_blocking(move || {
+                        if let Err(e) = store.insert_message(&msg_clone) {
+                            tracing::warn!("failed to persist message: {e:#}");
+                        }
+                    });
+
+                    if watcher.tx.send(WatcherEvent::Message(msg)).await.is_err() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+
+    // Mark session stale when the watcher exits (file removed or watcher died)
+    let store = watcher.store.clone();
+    let sid = session_id.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = store.set_session_status(&sid, SessionStatus::Stale) {
+            tracing::warn!("failed to mark session {sid} as stale: {e:#}");
+        }
+    });
+    let _ = watcher
+        .tx
+        .send(WatcherEvent::SessionEnded(session_id))
+        .await;
+
+    Ok(())
+}
+
+pub async fn watch_new_sessions(
+    projects_dir: PathBuf,
+    tx: mpsc::Sender<WatcherEvent>,
+    store: Arc<Store>,
+    max_age: u64,
+    initial_paths: HashSet<PathBuf>,
+) {
+    if let Err(e) =
+        watch_new_sessions_inner(projects_dir, tx, store, max_age, initial_paths).await
+    {
+        tracing::error!("directory watcher error: {e:#}");
+    }
+}
+
+async fn watch_new_sessions_inner(
+    projects_dir: PathBuf,
+    tx: mpsc::Sender<WatcherEvent>,
+    store: Arc<Store>,
+    max_age: u64,
+    mut known_paths: HashSet<PathBuf>,
+) -> anyhow::Result<()> {
+    let (notify_tx, mut notify_rx) = tokio::sync::mpsc::channel::<PathBuf>(16);
+
+    let mut dir_watcher =
+        notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = res {
+                if matches!(event.kind, EventKind::Create(_)) {
+                    for path in event.paths {
+                        if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                            let _ = notify_tx.blocking_send(path);
+                        }
+                    }
+                }
+            }
+        })?;
+    dir_watcher.watch(&projects_dir, RecursiveMode::Recursive)?;
+
+    loop {
+        match notify_rx.recv().await {
+            None => break,
+            Some(path) => {
+                if known_paths.contains(&path) {
+                    continue;
+                }
+                known_paths.insert(path.clone());
+
+                if max_age > 0 {
+                    let cutoff = Duration::from_secs(max_age * 60);
+                    let fresh = path
+                        .metadata()
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.elapsed().ok())
+                        .map(|age| age <= cutoff)
+                        .unwrap_or(true);
+                    if !fresh {
+                        continue;
+                    }
+                }
+
+                let session_id = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                let project_name = path
+                    .parent()
+                    .and_then(|p| {
+                        if p == projects_dir {
+                            None
+                        } else {
+                            p.strip_prefix(&projects_dir)
+                                .ok()
+                                .and_then(|rel| rel.iter().next())
+                                .and_then(|c| c.to_str())
+                                .map(|s| s.to_string())
+                        }
+                    })
+                    .unwrap_or_else(|| "default".to_string());
+
+                let last_modified = path
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(SystemTime::UNIX_EPOCH);
+
+                let ds = DiscoveredSession {
+                    session_id: session_id.clone(),
+                    project_name,
+                    harness: "claude".to_string(),
+                    file_path: path,
+                    last_modified,
+                };
+
+                let session = Session {
+                    id: ds.session_id.clone(),
+                    project_name: ds.project_name.clone(),
+                    file_path: ds.file_path.clone(),
+                    first_seen_at: chrono::Utc::now(),
+                    last_seen_at: chrono::Utc::now(),
+                    status: SessionStatus::Watching,
+                    message_count: 0,
+                };
+                let store2 = store.clone();
+                let sid = ds.session_id.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _ = store2.insert_session(&session);
+                    let _ = store2.set_session_status(&sid, SessionStatus::Watching);
+                })
+                .await
+                .ok();
+
+                tracing::info!("new session detected: {session_id}");
+
+                if tx.send(WatcherEvent::NewSession(ds.clone())).await.is_err() {
+                    break;
+                }
+
+                tokio::spawn(run(
+                    Watcher {
+                        tx: tx.clone(),
+                        store: store.clone(),
+                    },
+                    ds,
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}

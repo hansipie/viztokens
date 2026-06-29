@@ -19,6 +19,10 @@ impl Store {
         let conn = Connection::open(path)
             .with_context(|| format!("opening SQLite at {}", path.display()))?;
         conn.execute_batch(include_str!("schema.sql"))?;
+        // Migration for pre-existing databases that lack the tokens_estimated column.
+        let _ = conn.execute_batch(
+            "ALTER TABLE messages ADD COLUMN tokens_estimated INTEGER NOT NULL DEFAULT 0",
+        );
         Ok(Store {
             conn: Mutex::new(conn),
         })
@@ -72,8 +76,8 @@ impl Store {
             "INSERT OR IGNORE INTO messages
              (session_id, sequence_num, message_type, timestamp, content,
               tool_name, tool_use_id, anthropic_msg_id, request_id,
-              input_tokens, output_tokens, model)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+              input_tokens, output_tokens, tokens_estimated, model)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
             params![
                 m.session_id,
                 m.sequence_num as i64,
@@ -86,6 +90,7 @@ impl Store {
                 m.request_id,
                 m.input_tokens.map(|v| v as i64),
                 m.output_tokens.map(|v| v as i64),
+                m.tokens_estimated as i64,
                 m.model,
             ],
         )?;
@@ -100,7 +105,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, session_id, sequence_num, message_type, timestamp, content,
                     tool_name, tool_use_id, anthropic_msg_id, request_id,
-                    input_tokens, output_tokens, model
+                    input_tokens, output_tokens, tokens_estimated, model
              FROM messages WHERE session_id=?1
              ORDER BY sequence_num ASC",
         )?;
@@ -119,7 +124,8 @@ impl Store {
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, Option<i64>>(10)?,
                     row.get::<_, Option<i64>>(11)?,
-                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, i64>(12)?,
+                    row.get::<_, Option<String>>(13)?,
                 ))
             })?
             .collect::<Result<_, _>>()?;
@@ -138,6 +144,7 @@ impl Store {
             request_id,
             input_tokens,
             output_tokens,
+            tokens_estimated,
             model,
         ) in rows
         {
@@ -156,24 +163,27 @@ impl Store {
                 request_id,
                 input_tokens: input_tokens.map(|v| v as u32),
                 output_tokens: output_tokens.map(|v| v as u32),
+                tokens_estimated: tokens_estimated != 0,
                 model,
             });
         }
         Ok(messages)
     }
 
-    pub fn list_sessions(&self) -> anyhow::Result<Vec<Session>> {
+    fn query_sessions_inner(&self, where_clause: &str) -> anyhow::Result<Vec<Session>> {
         let conn = self
             .conn
             .lock()
             .map_err(|_| anyhow::anyhow!("SQLite mutex poisoned"))?;
-        let mut stmt = conn.prepare(
+        let sql = format!(
             "SELECT s.id, s.project_name, s.file_path, s.first_seen_at, s.last_seen_at,
                     s.status, COUNT(m.id)
              FROM sessions s LEFT JOIN messages m ON m.session_id = s.id
+             {where_clause}
              GROUP BY s.id
-             ORDER BY s.last_seen_at ASC",
-        )?;
+             ORDER BY s.last_seen_at ASC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows: Vec<_> = stmt
             .query_map([], |row| {
                 Ok((
@@ -203,6 +213,10 @@ impl Store {
             });
         }
         Ok(sessions)
+    }
+
+    pub fn list_sessions(&self) -> anyhow::Result<Vec<Session>> {
+        self.query_sessions_inner("")
     }
 
     pub fn count_messages(&self, session_id: &str) -> anyhow::Result<i64> {
@@ -243,47 +257,7 @@ impl Store {
     }
 
     pub fn list_stale_sessions(&self) -> anyhow::Result<Vec<Session>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("SQLite mutex poisoned"))?;
-        let mut stmt = conn.prepare(
-            "SELECT s.id, s.project_name, s.file_path, s.first_seen_at, s.last_seen_at,
-                    s.status, COUNT(m.id)
-             FROM sessions s LEFT JOIN messages m ON m.session_id = s.id
-             WHERE s.status='stale'
-             GROUP BY s.id
-             ORDER BY s.last_seen_at ASC",
-        )?;
-        let rows: Vec<_> = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, i64>(6)?,
-                ))
-            })?
-            .collect::<Result<_, _>>()?;
-
-        let mut sessions = Vec::with_capacity(rows.len());
-        for (id, project_name, file_path, first_seen_at, last_seen_at, status_str, message_count) in
-            rows
-        {
-            sessions.push(Session {
-                id,
-                project_name,
-                file_path: std::path::PathBuf::from(file_path),
-                first_seen_at: parse_ts(&first_seen_at),
-                last_seen_at: parse_ts(&last_seen_at),
-                status: parse_session_status(&status_str),
-                message_count: message_count as u64,
-            });
-        }
-        Ok(sessions)
+        self.query_sessions_inner("WHERE s.status='stale'")
     }
 
     pub fn clear_all(&self) -> anyhow::Result<usize> {
@@ -319,6 +293,19 @@ impl Store {
             params![session_status_str(&status), id],
         )?;
         Ok(())
+    }
+
+    pub fn max_sequence_num(&self, session_id: &str) -> anyhow::Result<u64> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("SQLite mutex poisoned"))?;
+        let max: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(sequence_num), 0) FROM messages WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )?;
+        Ok(max as u64)
     }
 
     pub fn message_exists(

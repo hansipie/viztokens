@@ -7,8 +7,7 @@ use tokio::sync::mpsc;
 
 use viztokens::model::MessageType;
 use viztokens::store::Store;
-use viztokens::watcher::session::DiscoveredSession;
-use viztokens::watcher::{Watcher, WatcherEvent};
+use viztokens::watcher::{DiscoveredSession, Watcher, WatcherEvent};
 
 fn make_store(dir: &TempDir) -> Arc<Store> {
     let db_path = dir.path().join("test.db");
@@ -19,6 +18,7 @@ fn discovered_session(dir: &TempDir, file_name: &str) -> DiscoveredSession {
     DiscoveredSession {
         session_id: "sess-test".to_string(),
         project_name: "test-project".to_string(),
+        harness: "claude".to_string(),
         file_path: dir.path().join(file_name),
         last_modified: std::time::SystemTime::now(),
     }
@@ -54,7 +54,7 @@ async fn watcher_receives_four_message_types() {
     let (tx, mut rx) = mpsc::channel(256);
     let w = Watcher { tx, store };
 
-    tokio::spawn(viztokens::watcher::run(w, session));
+    tokio::spawn(viztokens::claude::run(w, session));
 
     // Give watcher time to start and seek to end
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -112,6 +112,7 @@ async fn scroll_mode_messages_still_arrive() {
     let session = DiscoveredSession {
         session_id: "sess-scroll".to_string(),
         project_name: "test-project".to_string(),
+        harness: "claude".to_string(),
         file_path: file_path.clone(),
         last_modified: std::time::SystemTime::now(),
     };
@@ -119,7 +120,7 @@ async fn scroll_mode_messages_still_arrive() {
     let (tx, mut rx) = mpsc::channel(512);
     let w = Watcher { tx, store };
 
-    tokio::spawn(viztokens::watcher::run(w, session));
+    tokio::spawn(viztokens::claude::run(w, session));
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 

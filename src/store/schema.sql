@@ -22,9 +22,10 @@ CREATE TABLE IF NOT EXISTS messages (
     tool_use_id     TEXT,
     anthropic_msg_id TEXT,
     request_id      TEXT,
-    input_tokens    INTEGER,
-    output_tokens   INTEGER,
-    model           TEXT,
+    input_tokens       INTEGER,
+    output_tokens      INTEGER,
+    tokens_estimated   INTEGER NOT NULL DEFAULT 0,
+    model              TEXT,
     UNIQUE(session_id, sequence_num)
 );
 
